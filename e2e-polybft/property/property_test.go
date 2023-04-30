@@ -3,6 +3,7 @@ package property
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -34,14 +35,17 @@ func TestProperty_DifferentVotingPower(t *testing.T) {
 			premine[i] = rapid.Uint64Range(1, maxPremine).Draw(tt, fmt.Sprintf("stake for node %d", i+1))
 		}
 
-		cluster := framework.NewTestCluster(t, int(numNodes),
+		cluster := framework.NewPropertyTestCluster(t, int(numNodes),
 			framework.WithEpochSize(epochSize),
 			framework.WithSecretsCallback(func(adresses []types.Address, config *framework.TestClusterConfig) {
 				for i, a := range adresses {
-					config.PremineValidators = append(config.PremineValidators, fmt.Sprintf("%s:%d", a, premine[i]))
+					config.Premine = append(config.Premine, fmt.Sprintf("%s:%d", a, premine[i]))
 				}
 			}))
 		defer cluster.Stop()
+
+		t.Logf("Test %v, run with %d nodes, epoch size: %d. Number of blocks to mine: %d",
+			filepath.Base(cluster.Config.LogsDir), numNodes, epochSize, numBlocks)
 
 		// wait for single epoch to process withdrawal
 		require.NoError(t, cluster.WaitForBlock(numBlocks, blockTime*time.Duration(numBlocks)))

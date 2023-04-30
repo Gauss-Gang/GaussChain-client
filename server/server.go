@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -34,7 +35,7 @@ import (
 	"github.com/0xPolygon/polygon-edge/state"
 	itrie "github.com/0xPolygon/polygon-edge/state/immutable-trie"
 	"github.com/0xPolygon/polygon-edge/state/runtime"
-	"github.com/0xPolygon/polygon-edge/state/runtime/allowlist"
+	"github.com/0xPolygon/polygon-edge/state/runtime/addresslist"
 	"github.com/0xPolygon/polygon-edge/state/runtime/tracer"
 	"github.com/0xPolygon/polygon-edge/txpool"
 	"github.com/0xPolygon/polygon-edge/types"
@@ -44,6 +45,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/umbracle/ethgo"
 	"google.golang.org/grpc"
+)
+
+var (
+	errBlockTimeMissing = errors.New("block time configuration is missing")
+	errBlockTimeInvalid = errors.New("block time configuration is invalid")
 )
 
 // Server is the central manager of the blockchain client
@@ -208,14 +214,38 @@ func NewServer(config *Config) (*Server, error) {
 
 	// apply allow list contracts deployer genesis data
 	if m.config.Chain.Params.ContractDeployerAllowList != nil {
-		allowlist.ApplyGenesisAllocs(m.config.Chain.Genesis, contracts.AllowListContractsAddr,
+		addresslist.ApplyGenesisAllocs(m.config.Chain.Genesis, contracts.AllowListContractsAddr,
 			m.config.Chain.Params.ContractDeployerAllowList)
+	}
+
+	// apply block list contracts deployer genesis data
+	if m.config.Chain.Params.ContractDeployerBlockList != nil {
+		addresslist.ApplyGenesisAllocs(m.config.Chain.Genesis, contracts.BlockListContractsAddr,
+			m.config.Chain.Params.ContractDeployerBlockList)
 	}
 
 	// apply transactions execution allow list genesis data
 	if m.config.Chain.Params.TransactionsAllowList != nil {
-		allowlist.ApplyGenesisAllocs(m.config.Chain.Genesis, contracts.AllowListTransactionsAddr,
+		addresslist.ApplyGenesisAllocs(m.config.Chain.Genesis, contracts.AllowListTransactionsAddr,
 			m.config.Chain.Params.TransactionsAllowList)
+	}
+
+	// apply transactions execution block list genesis data
+	if m.config.Chain.Params.TransactionsBlockList != nil {
+		addresslist.ApplyGenesisAllocs(m.config.Chain.Genesis, contracts.BlockListTransactionsAddr,
+			m.config.Chain.Params.TransactionsBlockList)
+	}
+
+	// apply bridge allow list genesis data
+	if m.config.Chain.Params.BridgeAllowList != nil {
+		addresslist.ApplyGenesisAllocs(m.config.Chain.Genesis, contracts.AllowListBridgeAddr,
+			m.config.Chain.Params.BridgeAllowList)
+	}
+
+	// apply bridge block list genesis data
+	if m.config.Chain.Params.BridgeBlockList != nil {
+		addresslist.ApplyGenesisAllocs(m.config.Chain.Genesis, contracts.BlockListBridgeAddr,
+			m.config.Chain.Params.BridgeBlockList)
 	}
 
 	var initialStateRoot = types.ZeroHash
@@ -250,8 +280,15 @@ func NewServer(config *Config) (*Server, error) {
 	// compute the genesis root state
 	config.Chain.Genesis.StateRoot = genesisRoot
 
-	// use the eip155 signer
-	signer := crypto.NewEIP155Signer(chain.AllForksEnabled.At(0), uint64(m.config.Chain.Params.ChainID))
+	// Use the london signer with eip-155 as a fallback one
+	var signer crypto.TxSigner = crypto.NewLondonSigner(
+		uint64(m.config.Chain.Params.ChainID),
+		chain.AllForksEnabled.At(0).Homestead,
+		crypto.NewEIP155Signer(
+			uint64(m.config.Chain.Params.ChainID),
+			chain.AllForksEnabled.At(0).Homestead,
+		),
+	)
 
 	// create storage instance for blockchain
 	var db storage.Storage
@@ -273,7 +310,14 @@ func NewServer(config *Config) (*Server, error) {
 	}
 
 	// blockchain object
-	m.blockchain, err = blockchain.NewBlockchain(logger, db, config.Chain, nil, m.executor, signer)
+	m.blockchain, err = blockchain.NewBlockchain(
+		logger,
+		db,
+		config.Chain,
+		nil,
+		m.executor,
+		signer,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -500,6 +544,18 @@ func (s *Server) setupConsensus() error {
 		engineConfig = map[string]interface{}{}
 	}
 
+	var (
+		blockTime = common.Duration{Duration: 0}
+		err       error
+	)
+
+	if engineName != string(DummyConsensus) && engineName != string(DevConsensus) {
+		blockTime, err = extractBlockTime(engineConfig)
+		if err != nil {
+			return err
+		}
+	}
+
 	config := &consensus.Config{
 		Params: s.config.Chain.Params,
 		Config: engineConfig,
@@ -517,7 +573,7 @@ func (s *Server) setupConsensus() error {
 			Grpc:                  s.grpcServer,
 			Logger:                s.logger,
 			SecretsManager:        s.secretsManager,
-			BlockTime:             s.config.BlockTime,
+			BlockTime:             uint64(blockTime.Seconds()),
 			NumBlockConfirmations: s.config.NumBlockConfirmations,
 		},
 	)
@@ -529,6 +585,32 @@ func (s *Server) setupConsensus() error {
 	s.consensus = consensus
 
 	return nil
+}
+
+// extractBlockTime extracts blockTime parameter from consensus engine configuration.
+// If it is missing or invalid, an appropriate error is returned.
+func extractBlockTime(engineConfig map[string]interface{}) (common.Duration, error) {
+	blockTimeGeneric, ok := engineConfig["blockTime"]
+	if !ok {
+		return common.Duration{}, errBlockTimeMissing
+	}
+
+	blockTimeRaw, err := json.Marshal(blockTimeGeneric)
+	if err != nil {
+		return common.Duration{}, errBlockTimeInvalid
+	}
+
+	var blockTime common.Duration
+
+	if err := json.Unmarshal(blockTimeRaw, &blockTime); err != nil {
+		return common.Duration{}, errBlockTimeInvalid
+	}
+
+	if blockTime.Seconds() < 1 {
+		return common.Duration{}, errBlockTimeInvalid
+	}
+
+	return blockTime, nil
 }
 
 // setupRelayer sets up the relayer
@@ -633,6 +715,7 @@ func (j *jsonRPCHub) GetCode(root types.Hash, addr types.Address) ([]byte, error
 func (j *jsonRPCHub) ApplyTxn(
 	header *types.Header,
 	txn *types.Transaction,
+	override types.StateOverride,
 ) (result *runtime.ExecutionResult, err error) {
 	blockCreator, err := j.GetConsensus().GetBlockCreator(header)
 	if err != nil {
@@ -642,6 +725,12 @@ func (j *jsonRPCHub) ApplyTxn(
 	transition, err := j.BeginTxn(header.StateRoot, header, blockCreator)
 	if err != nil {
 		return
+	}
+
+	if override != nil {
+		if err = transition.WithStateOverride(override); err != nil {
+			return
+		}
 	}
 
 	result, err = transition.Apply(txn)

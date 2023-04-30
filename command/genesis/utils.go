@@ -62,13 +62,13 @@ func verifyGenesisExistence(genesisPath string) *GenesisGenError {
 	return nil
 }
 
-type PremineInfo struct {
-	Address types.Address
-	Amount  *big.Int
+type premineInfo struct {
+	address types.Address
+	amount  *big.Int
 }
 
-// ParsePremineInfo parses provided premine information and returns premine address and amount
-func ParsePremineInfo(premineInfoRaw string) (*PremineInfo, error) {
+// parsePremineInfo parses provided premine information and returns premine address and amount
+func parsePremineInfo(premineInfoRaw string) (*premineInfo, error) {
 	var (
 		address types.Address
 		amount  = command.DefaultPremineBalance
@@ -90,7 +90,7 @@ func ParsePremineInfo(premineInfoRaw string) (*PremineInfo, error) {
 		address = types.StringToAddress(premineInfoRaw)
 	}
 
-	return &PremineInfo{Address: address, Amount: amount}, nil
+	return &premineInfo{address: address, amount: amount}, nil
 }
 
 // parseTrackerStartBlocks parses provided event tracker start blocks configuration.
@@ -118,6 +118,24 @@ func parseTrackerStartBlocks(trackerStartBlocksRaw []string) (map[types.Address]
 	}
 
 	return trackerStartBlocksConfig, nil
+}
+
+// parseBurnContractInfo parses provided burn contract information and returns burn contract block and address
+func parseBurnContractInfo(burnContractInfoRaw string) (uint64, types.Address, error) {
+	// <block>:<address>
+	burnContractParts := strings.Split(burnContractInfoRaw, ":")
+	if len(burnContractParts) != 2 {
+		return 0, types.ZeroAddress, fmt.Errorf("expected format: <block>:<address>")
+	}
+
+	blockRaw := burnContractParts[0]
+
+	block, err := types.ParseUint256orHex(&blockRaw)
+	if err != nil {
+		return 0, types.ZeroAddress, fmt.Errorf("failed to parse amount %s: %w", blockRaw, err)
+	}
+
+	return block.Uint64(), types.StringToAddress(burnContractParts[1]), nil
 }
 
 // GetValidatorKeyFiles returns file names which has validator secrets

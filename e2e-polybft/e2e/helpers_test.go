@@ -9,16 +9,21 @@ import (
 	"math/big"
 	"net/http"
 	"testing"
+	"time"
+
+	"github.com/umbracle/ethgo"
+	"github.com/umbracle/ethgo/contract"
 
 	"github.com/0xPolygon/polygon-edge/consensus/polybft"
 	"github.com/0xPolygon/polygon-edge/consensus/polybft/contractsapi"
 	"github.com/0xPolygon/polygon-edge/consensus/polybft/contractsapi/artifact"
+	"github.com/0xPolygon/polygon-edge/e2e-polybft/framework"
+	"github.com/0xPolygon/polygon-edge/helper/common"
 	"github.com/0xPolygon/polygon-edge/helper/hex"
+	"github.com/0xPolygon/polygon-edge/state/runtime/addresslist"
 	"github.com/0xPolygon/polygon-edge/txrelayer"
 	"github.com/0xPolygon/polygon-edge/types"
 	"github.com/stretchr/testify/require"
-	"github.com/umbracle/ethgo"
-	"github.com/umbracle/ethgo/contract"
 	ethgow "github.com/umbracle/ethgo/wallet"
 )
 
@@ -68,7 +73,7 @@ func getRootchainValidators(relayer txrelayer.TxRelayer, checkpointManagerAddr e
 		return nil, err
 	}
 
-	validatorsCount, err := types.ParseUint64orHex(&validatorsCountRaw)
+	validatorsCount, err := common.ParseUint64orHex(&validatorsCountRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -223,16 +228,77 @@ func checkStateSyncResultLogs(
 	expectedCount int,
 ) {
 	t.Helper()
-	require.Len(t, logs, expectedCount)
+	require.Equal(t, len(logs), expectedCount)
 
 	var stateSyncResultEvent contractsapi.StateSyncResultEvent
 	for _, log := range logs {
 		doesMatch, err := stateSyncResultEvent.ParseLog(log)
-		require.True(t, doesMatch)
 		require.NoError(t, err)
+		require.True(t, doesMatch)
 
 		t.Logf("Block Number=%d, Decoded Log=%+v\n", log.BlockNumber, stateSyncResultEvent)
 
 		require.True(t, stateSyncResultEvent.Status)
 	}
+}
+
+// getCheckpointBlockNumber gets current checkpoint block number from checkpoint manager smart contract
+func getCheckpointBlockNumber(l1Relayer txrelayer.TxRelayer, checkpointManagerAddr ethgo.Address) (uint64, error) {
+	checkpointBlockNumRaw, err := ABICall(l1Relayer, contractsapi.CheckpointManager,
+		checkpointManagerAddr, ethgo.ZeroAddress, "currentCheckpointBlockNumber")
+	if err != nil {
+		return 0, err
+	}
+
+	actualCheckpointBlock, err := types.ParseUint64orHex(&checkpointBlockNumRaw)
+	if err != nil {
+		return 0, err
+	}
+
+	return actualCheckpointBlock, nil
+}
+
+// waitForRootchainEpoch blocks for some predefined timeout to reach target epoch
+func waitForRootchainEpoch(targetEpoch uint64, timeout time.Duration,
+	rootchainTxRelayer txrelayer.TxRelayer, checkpointManager types.Address) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timer.C:
+			return errors.New("root chain hasn't progressed to the desired epoch")
+		case <-ticker.C:
+		}
+
+		rootchainEpochRaw, err := ABICall(rootchainTxRelayer, contractsapi.CheckpointManager,
+			ethgo.Address(checkpointManager), ethgo.ZeroAddress, "currentEpoch")
+		if err != nil {
+			return err
+		}
+
+		rootchainEpoch, err := types.ParseUint64orHex(&rootchainEpochRaw)
+		if err != nil {
+			return err
+		}
+
+		if rootchainEpoch >= targetEpoch {
+			return nil
+		}
+	}
+}
+
+func expectRole(t *testing.T, cluster *framework.TestCluster, contract types.Address, addr types.Address, role addresslist.Role) {
+	t.Helper()
+	out := cluster.Call(t, contract, addresslist.ReadAddressListFunc, addr)
+
+	num, ok := out["0"].(*big.Int)
+	if !ok {
+		t.Fatal("unexpected")
+	}
+
+	require.Equal(t, role.Uint64(), num.Uint64())
 }

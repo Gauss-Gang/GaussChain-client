@@ -97,6 +97,7 @@ func main() {
 			"ExitHelper",
 			gensc.ExitHelper,
 			[]string{
+				"initialize",
 				"exit",
 			},
 			[]string{},
@@ -139,8 +140,82 @@ func main() {
 			"RootERC20",
 			gensc.RootERC20,
 			[]string{
+				"balanceOf",
 				"approve",
 				"mint",
+			},
+			[]string{},
+		},
+		{
+			"RootERC1155Predicate",
+			gensc.RootERC1155Predicate,
+			[]string{
+				"initialize",
+				"depositBatch",
+			},
+			[]string{},
+		},
+		{
+			"RootERC1155",
+			gensc.RootERC1155,
+			[]string{
+				"setApprovalForAll",
+				"mintBatch",
+				"balanceOf",
+			},
+			[]string{},
+		},
+		{
+			"ChildERC1155Predicate",
+			gensc.ChildERC1155Predicate,
+			[]string{
+				"initialize",
+				"withdrawBatch",
+			},
+			[]string{},
+		},
+		{
+			"ChildERC1155",
+			gensc.ChildERC1155,
+			[]string{
+				"initialize",
+				"balanceOf",
+			},
+			[]string{},
+		},
+		{
+			"RootERC721Predicate",
+			gensc.RootERC721Predicate,
+			[]string{
+				"initialize",
+				"depositBatch",
+			},
+			[]string{},
+		},
+		{
+			"RootERC721",
+			gensc.RootERC721,
+			[]string{
+				"setApprovalForAll",
+				"mint",
+			},
+			[]string{},
+		},
+		{
+			"ChildERC721Predicate",
+			gensc.ChildERC721Predicate,
+			[]string{
+				"initialize",
+				"withdrawBatch",
+			},
+			[]string{},
+		},
+		{
+			"ChildERC721",
+			gensc.ChildERC721,
+			[]string{
+				"initialize",
+				"ownerOf",
 			},
 			[]string{},
 		},

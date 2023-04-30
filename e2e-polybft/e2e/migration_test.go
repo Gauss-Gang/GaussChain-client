@@ -21,7 +21,7 @@ import (
 	"github.com/umbracle/ethgo/wallet"
 )
 
-func TestMigration(t *testing.T) {
+func TestE2E_Migration(t *testing.T) {
 	userKey, _ := wallet.GenerateKey()
 	userAddr := userKey.Address()
 	userKey2, _ := wallet.GenerateKey()
@@ -204,6 +204,6 @@ func TestMigration(t *testing.T) {
 	_, err = cluster.InitSecrets("test-chain-8", 1)
 	require.NoError(t, err)
 
-	cluster.InitTestServer(t, 8, false, false)
+	cluster.InitTestServer(t, "test-chain-8", false, false)
 	require.NoError(t, cluster.WaitForBlock(33, time.Minute))
 }
